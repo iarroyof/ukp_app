@@ -103,7 +103,7 @@ class BayesClassifier:
         I create sample spaces for each RV"""
         (self.omega_x, Tx) = np.unique(X, return_counts=True)
         (self.omega_y, Ty) = np.unique(Y, return_counts=True)
-        self.PY = {y: ty for y, ty in zip(self.omega_y, Ty)} 
+        self.PY = {y: ty / sum(Ty) for y, ty in zip(self.omega_y, Ty)} 
 
         # Create contigency table (Kronecker product)
         f_xy = {}
@@ -131,7 +131,7 @@ class BayesClassifier:
             posterior distribution of an input document. 
         """
         tokens = list(set(self.tokenize(text)))
-        prod = 1.0 # [1.0]  *  len(self.omega_y)
+        prod = 0.0 # [1.0]  *  len(self.omega_y)
         pmfs = [] 
         for y in self.omega_y:
             for x in tokens:
