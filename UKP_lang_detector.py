@@ -23,9 +23,13 @@ def accuracy(y, y_hat):
     return eqs / len(y)
 
 
-def prepare_data(file_url, sample=0.01, languages=['English', 'German', 'French', 'Spanish']):
-    # Load dataset
-    # https://www.kaggle.com/basilb2s/language-detection
+def prepare_data_RVs(file_url, sample=0.01, languages=['English', 'German', 'French', 'Spanish']):
+    """Load dataset from
+    https://www.kaggle.com/basilb2s/language-detection
+    and convert each n-gram 'w' of characters into a feature, that is
+    an item of the sample space of a random variable 'X(w)' representing
+    input documents.
+    """
  
     dataset = pd.read_csv(file_url, encoding="utf-8")
     dataset = dataset[dataset.Language.isin(languages)].sample(frac=sample)
@@ -59,7 +63,19 @@ def prepare_data(file_url, sample=0.01, languages=['English', 'German', 'French'
 
 
 class BayesClassifier:
+    """This class implements a Naïve Bayes classifier specifically coded for
+    two discrete RVs, X and Y. X is the RV taking on n-grams of characters 
+    composing input documents, and Y is the RV taking on languages. Thus to
+    infer the language an input document is written in, I compute:
 
+    P(Y=y|X=x) = P(Y=y) \Pi_{w\in x} P(Y=y|w)
+
+    Parameters:
+    ngram_range: range of sizes of the ngrams of characters an input document
+                 splits in. 
+    exact_estimator: whether the likelihood is computed using partition function
+                     or using only counts. 
+    """
     def __init__(self, ngram_range=(1, 3), out_distributions=False, exact_estimator=False):
         self.ngram_range = ngram_range
         self.out_dist = out_distributions
@@ -140,7 +156,7 @@ class BayesClassifier:
 
 #MAIN
 url = "https://raw.githubusercontent.com/iarroyof/ukp_app/main/Language%20Detection.csv"
-X_train, Y_train, X_test, Y_test = prepare_data(url, sample=0.01, languages=['English', 'German', 'Spanish'])
+X_train, Y_train, X_test, Y_test = prepare_data_RVs(url, sample=0.01, languages=['English', 'German', 'Spanish'])
  
 bayes = BayesClassifier(ngram_range=(1, 4), exact_estimator=True)
 
