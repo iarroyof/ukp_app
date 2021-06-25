@@ -1,6 +1,8 @@
 from collections import deque
 import numpy as np
 import pandas as pd
+
+NGRAMS = (1, 3)
  
 def tokenize(doc, ngram_range=(1, 3)):
  
@@ -35,30 +37,30 @@ def prepare_data_RVs(file_url, sample=0.01, languages=['English', 'German', 'Fre
     dataset = dataset[dataset.Language.isin(languages)].sample(frac=sample)
     train_data = dataset.iloc[0:int(0.7 * len(dataset.index))]
     test_data = dataset.iloc[int(0.7 * len(dataset.index)):]
- 
-    X_train_data = train_data.Text.apply(tokenize)
+
+    X_train_data = train_data.Text.apply(tokenize, ngram_range=NGRAMS)
     X_train_data = X_train_data.apply(set)
     X_train_data = X_train_data.apply(list)
     Y_train_data = train_data.Language
- 
+
     Xtrain = []
     Ytrain = []
- 
+
     for x, y in zip(X_train_data, Y_train_data):
         Ytrain += [y] * len(x)
         Xtrain += x
- 
-    X_test_data = test_data.Text.apply(tokenize)
+
+    X_test_data = test_data.Text.apply(tokenize, ngram_range=NGRAMS)
     X_test_data = X_test_data.apply(set)
     X_test_data = X_test_data.apply(list)
     Y_test_data = test_data.Language
- 
+
     Ytest = []
     Xtest = []
     for x, y in zip(X_test_data, Y_test_data):
         Ytest += [y] * len(x)
         Xtest += x
- 
+
     return Xtrain, Ytrain, Xtest, Ytest
 
 
@@ -76,22 +78,9 @@ class BayesClassifier:
     exact_estimator: whether the likelihood is computed using partition function
                      or using only counts. 
     """
-    def __init__(self, ngram_range=(1, 3), out_distributions=False, exact_estimator=False):
+    def __init__(self, ngram_range=(1, 3), exact_estimator=False):
         self.ngram_range = ngram_range
-        self.out_dist = out_distributions
         self.exact = exact_estimator
-
-
-    def tokenize(self, doc):
-
-        collected_ngrams = []
-        for ng_size in range(*self.ngram_range):
-            window = deque(maxlen=ng_size)
-            for ch in doc:
-                window.append(ch)
-                collected_ngrams.append(''.join(list(window)))
-
-        return collected_ngrams
 
 
     def fit(self, X, Y):
@@ -113,7 +102,7 @@ class BayesClassifier:
                     for x_, y_ in zip(X, Y)])
 
 
-         # Posterior computations
+        # Posterior computations
         if self.exact:
             self.PYgX = {}
             for y in self.omega_y:
@@ -130,8 +119,8 @@ class BayesClassifier:
         """ This function uses Naïve Assumption to compute
             posterior distribution of an input document. 
         """
-        tokens = list(set(self.tokenize(text)))
-        prod = 0.0 # [1.0]  *  len(self.omega_y)
+        tokens = list(set(tokenize(text, ngram_range=NGRAMS)))
+        prod = 0.0
         pmfs = [] 
         for y in self.omega_y:
             for x in tokens:
@@ -142,12 +131,6 @@ class BayesClassifier:
             pmfs.append(self.PY[y] * prod)
 
         return self.omega_y[np.argmax(pmfs)] 
-        #for ygx in pmfs.items():
-        #    prod = np.multiply(prod, ygx)
-        #if self.out_dist:
-        #    return list(zip(self.omega_y, prod))
-        #else:
-        #    return self.omega_y[np.argmax(prod)]
 
 
     def predict(self, X):
@@ -158,7 +141,7 @@ class BayesClassifier:
 url = "https://raw.githubusercontent.com/iarroyof/ukp_app/main/Language%20Detection.csv"
 X_train, Y_train, X_test, Y_test = prepare_data_RVs(url, sample=0.01, languages=['English', 'German', 'Spanish'])
  
-bayes = BayesClassifier(ngram_range=(1, 4), exact_estimator=True)
+bayes = BayesClassifier(ngram_range=NGRAMS, exact_estimator=True)
 
 bayes.fit(X_train, Y_train)
 
