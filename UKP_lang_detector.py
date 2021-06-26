@@ -1,3 +1,11 @@
+# The Bayes Theorem was first proposed for Language Identification in the next references:
+# Dunning, T. (1994). Statistical identification of language (pp. 94-273). Las Cruces, NM, USA: Computing Research Laboratory, New Mexico State University.
+# Cavnar, W. B., & Trenkle, J. M. (1994, April). N-gram-based text categorization. In Proceedings of SDAIR-94, 3rd annual symposium on document analysis and information retrieval (Vol. 161175).
+# Extended Bayes:
+# Language Identification with Confidence Limits. 
+# I implemented the basic version in this approach
+
+
 from collections import deque
 import numpy as np
 import pandas as pd
