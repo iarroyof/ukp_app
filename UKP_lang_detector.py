@@ -147,6 +147,7 @@ class BayesClassifier:
 
 #MAIN
 url = "https://raw.githubusercontent.com/iarroyof/ukp_app/main/Language%20Detection.csv"
+# Load train and test data for three languages:
 X_train, Y_train, X_test, Y_test = prepare_data_RVs(url, sample=0.01, languages=['English', 'German', 'Spanish'])
  
 bayes = BayesClassifier(ngram_range=NGRAMS, exact_estimator=True)
