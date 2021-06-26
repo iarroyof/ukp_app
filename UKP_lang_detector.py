@@ -94,7 +94,7 @@ class BayesClassifier:
     def fit(self, X, Y):
         """Bayes training
         I first create a contingecy table
-        Each cell contains the result of the indicator product function 
+        Each cell contains the area of the indicator product function 
         f(x, y) = 1 if x == x' and y == y' ? 0 otherwise.
 
         I create sample spaces for each RV"""
@@ -102,7 +102,7 @@ class BayesClassifier:
         (self.omega_y, Ty) = np.unique(Y, return_counts=True)
         self.PY = {y: ty / sum(Ty) for y, ty in zip(self.omega_y, Ty)} 
 
-        # Create contigency table (Kronecker product)
+        # Create contigency table
         f_xy = {}
         for x in self.omega_x:
             for y in self.omega_y:
