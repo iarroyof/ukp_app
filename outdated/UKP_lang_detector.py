@@ -8,6 +8,16 @@
 from collections import deque
 import numpy as np
 import pandas as pd
+import unicodedata
+import string
+
+
+
+
+def filter_non_printable(str):
+    printable = {'Lu', 'Ll'}
+  
+    return ''.join(c for c in str if unicodedata.category(c) in printable or c == ' ')
 
 
 def accuracy(y, y_hat):
@@ -15,7 +25,7 @@ def accuracy(y, y_hat):
     for a, b in zip(y, y_hat):
         if a == b:
             eqs += 1
- 
+
     return eqs / len(y)
 
 
@@ -26,13 +36,13 @@ def prepare_data_RVs(file_url, sample=0.01, languages=['English', 'German', 'Fre
     an item of the sample space of a random variable 'X(w)' representing
     input documents.
     """
- 
+
     dataset = pd.read_csv(file_url, encoding="utf-8")
     dataset = dataset[dataset.Language.isin(languages)].sample(frac=sample)
     train_data = dataset.iloc[0:int(0.7 * len(dataset.index))]
     Xtrain = train_data.Text
     Ytrain = train_data.Language
-    
+
     test_data = dataset.iloc[int(0.7 * len(dataset.index)):]
     Xtest = test_data.Text
     Ytest = test_data.Language
@@ -46,13 +56,15 @@ class BayesClassifier:
     composing input documents, and Y is the RV taking on languages. Thus to
     infer the language an input document is written in, I compute:
 
-    P(Y=y|X=x) = P(Y=y) \Pi_{w\in x} P(Y=y|w)
+    $$P(Y=y|X=x) = P(Y=y) \Pi_{w\in x} P(Y=y|w)$$
 
     Parameters:
+    -----------
+
     ngram_range: range of sizes of the ngrams of characters an input document
-                 splits in. 
+                 splits in.
     exact_estimator: whether the likelihood is computed using partition function
-                     or using only counts. 
+                     or using only counts.
     """
     def __init__(self, ngram_range=(1, 3), exact_estimator=False):
         self.ngram_range = ngram_range
@@ -60,17 +72,19 @@ class BayesClassifier:
 
 
     def tokenize(self, doc):
- 
+
         collected_ngrams = []
+        doc = doc.translate(str.maketrans('', '', string.punctuation))
+        doc = filter_non_printable(doc)
         for ng_size in range(*self.ngram_range):
             window = deque(maxlen=ng_size)
             for ch in doc:
                 window.append(ch)
                 collected_ngrams.append(''.join(list(window)))
- 
-        return collected_ngrams  
 
- 
+        return collected_ngrams
+
+
     def fill_RVs(self, X_data, Y_data=None):
         X_data = X_data.apply(self.tokenize)
         X_data = X_data.apply(set)
@@ -81,83 +95,112 @@ class BayesClassifier:
         if Y_data is None:
             for x in X_data:
                 X += x
-            
+
             return X
         else:
             for x, y in zip(X_data, Y_data):
                 Y += [y] * len(x)
                 X += x
-           
+
             return X, Y
 
 
     def fit(self, X, Y):
         """Bayes training
         I first create a contingecy table
-        Each cell contains the area of the indicator product function 
+        Each cell contains the area of the indicator product function
         f(x, y) = 1 if x == x' and y == y' ? 0 otherwise.
-
-        I create sample spaces for each RV"""
+        """
+        # Create sample spaces and compute class probability distribution P(Y)
         X, Y = self.fill_RVs(X, Y)
         (self.omega_x, Tx) = np.unique(X, return_counts=True)
         (self.omega_y, Ty) = np.unique(Y, return_counts=True)
-        self.PY = {y: ty / sum(Ty) for y, ty in zip(self.omega_y, Ty)} 
+        self.PY = {y: ty / sum(Ty) for y, ty in zip(self.omega_y, Ty)}
+        #self.PX = {x: tx / sum(Tx) for x, tx in zip(self.omega_x, Tx)} 
 
         # Create contigency table
         f_xy = {}
-        for x in self.omega_x:
-            for y in self.omega_y:
-                f_xy[(x, y)] = sum([int(x_ == x and y_ == y)
-                    for x_, y_ in zip(X, Y)])
-
+        for x, y in zip(X, Y):
+            if (x, y) in f_xy:
+                f_xy[(x, y)] += 1.0
+            else:
+                f_xy[(x, y)] = 1.0
 
         # Posterior computations
+        self.PYgX = {}
         if self.exact:
-            self.PYgX = {}
             for y in self.omega_y:
                 for x in self.omega_x:
-                    Zx = sum([f_xy[(x, y_)] for y_ in self.omega_y])
-                    self.PYgX[(y, x)] = f_xy[(x, y)] / Zx
+                    Zx = []
+                    for y_ in self.omega_y:
+                        try:
+                            Zx.append(f_xy[(x, y_)])
+                        except KeyError:
+                            pass
+                    try:
+                        self.PYgX[(y, x)] = f_xy[(x, y)] / sum(Zx)
+                    except KeyError:
+                        self.PYgX[(y, x)] = 0.0
         else:
-            self.PYgX = f_xy
+            for k, v in f_xy.items():
+                self.PYgX[(k[1], k[0])] = v / Tx[np.where(self.omega_x==k[0])]
 
         return self
 
 
     def posterior(self, text):
         """ This function uses Naïve Assumption to compute
-            posterior distribution of an input document. 
+            posterior distribution of an input document.
         """
         tokens = list(set(self.tokenize(text)))
-        prod = 0.0
-        pmfs = [] 
+
         for y in self.omega_y:
             for x in tokens:
                 try:
-                    prod += np.log2(self.PYgX[(y, x)])
+                    self.PY[y] *= self.PYgX[(y, x)]
+                    #if p > 0.0:
+                    #    prod += np.log2(p)
+                    #else:
+                    #    prod += 0.0
                 except KeyError:
                     pass
-            pmfs.append(self.PY[y] * prod)
 
-        return self.omega_y[np.argmax(pmfs)] 
+        return max(self.PY, key=self.PY.get)
 
 
     def predict(self, X):
         predictions = [self.posterior(x) for x in X]
-      
+
         return predictions
 
-      
-#MAIN
-ngrams = (1, 3)
-url = "https://raw.githubusercontent.com/iarroyof/ukp_app/main/Language%20Detection.csv"
-# Load train and test data for three languages:
-X_train, Y_train, X_test, Y_test = prepare_data_RVs(url, sample=0.01, languages=['English', 'German', 'Spanish'])
- 
-bayes = BayesClassifier(ngram_range=ngrams, exact_estimator=True)
 
+# MAIN:
+exact = False
+ngrams = (1, 4)
+training_portion = 1.0
+languages = ['English', 'Spanish']
+url = "https://raw.githubusercontent.com/iarroyof/ukp_app/main/Language%20Detection.csv"
+
+# Load train and test data for three languages:
+X_train, Y_train, X_test, Y_test = prepare_data_RVs(url, sample=training_portion, languages=languages)
+
+bayes = BayesClassifier(ngram_range=ngrams, exact_estimator=exact)
+
+print("Training the classifier with {}% of the input data for {} languages: {}... ***more training data needs more training time***".format(training_portion * 100, len(languages), ", ".join(languages)))
 bayes.fit(X_train, Y_train)
 
 Y_hat = bayes.predict(X_test)
+print(pd.DataFrame({"Y": Y_test, "Y_hat": Y_hat}).head(50))
+print("Test accuracy of the implementation:")
+print(accuracy(Y_test, Y_hat))
 
-accuracy(Y_test, Y_hat)
+print("Now write an input sentence or plain text file name (*.txt) in one of {} languages: {}".format(len(languages), ", ".join(languages)))
+
+test_string = input()
+if test_string.endswith(".txt"):
+    with open(test_string, encoding="utf8", errors="ignore") as f:
+        test_string = " ".join(f.readlines())
+
+Y_hat = bayes.predict([test_string])
+
+print("Predicted language: {}".format(Y_hat))
