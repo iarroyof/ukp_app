@@ -15,10 +15,14 @@ from collections import deque
 from scipy.sparse import csr_matrix
 import string
 import unicodedata
+from os import path
+
 
 
 def tokenize(doc, ngram_range=(1, 3)):
-
+    """This function tokenizes an input string 'doc' as character ngrams. The
+    non-words and nonprintable characters are discarded. 
+    """
     collected_ngrams = []
     doc = doc.translate(str.maketrans('', '', string.punctuation))
     doc = filter_non_printable(doc)
@@ -31,7 +35,11 @@ def tokenize(doc, ngram_range=(1, 3)):
     return collected_ngrams
 
     
-def categorical_encoder(X, vocabulary=None, binary_vertorizer=False):
+def categorical_encoder(X, vocabulary=None):
+    """This function encodes each document (string) in 'X' as a binary array.
+    To encode test data only pass the vocabulary collected from the fisrt 
+    call to the function so as to use the same indices for each feature.
+    """
     X = list(map(tokenize, X))
     if vocabulary is None:
         vocabulary = list(set(sum([d for d in X], [])))
@@ -49,20 +57,14 @@ def categorical_encoder(X, vocabulary=None, binary_vertorizer=False):
     row = []
     col = []
     data = []
-    for i, r in enumerate(docs_idxs):
-        if binary_vertorizer:
-            used = []
-            for c in r:
-                if not c in used:
-                    row.append(i)
-                    col.append(c)
-                    data.append(1.0)
-                    used.append(c)
-        else:
-            for c in r:
+    for i, roww in enumerate(docs_idxs):   
+        used = []
+        for c in roww:
+            if not c in used:
                 row.append(i)
                 col.append(c)
                 data.append(1.0)
+                used.append(c)
 
     X_csr = csr_matrix((data, (row, col)),
                         shape=(len(docs_idxs), len(vocabulary) + 1))
@@ -71,6 +73,7 @@ def categorical_encoder(X, vocabulary=None, binary_vertorizer=False):
 
 
 def filter_non_printable(str):
+
     printable = {'Lu', 'Ll'}
   
     return ''.join(
@@ -79,10 +82,22 @@ def filter_non_printable(str):
 
 def prepare_data(file_url, sample=0.01,
                         languages=['English', 'German', 'French', 'Spanish']):
+    """This function prepares the input CSV file with two columns ['Text',
+    'Language'] and encodes each document as a binary array.
     """
-    """
-
-    dataset = pd.read_csv(file_url, encoding="utf-8")
+    try:
+        dataset = pd.read_csv(file_url, encoding="utf-8")
+    except:
+        if path.exists("Language_Detection.csv"):
+            dataset = pd.read_csv("Language_Detection.csv", encoding="utf-8")
+        else:
+            print("The download address to the training data is not available,"
+                "please try some minutes later. Also you can download the data"
+                " from my Github repo:"
+                "\nhttps://github.com/iarroyof/ukp_app/blob/main/Language_"
+                "Detection.csv"
+                "\nPlease tut it into you current directory and execute this"
+                " script again.")
     dataset = dataset[dataset.Language.isin(languages)].sample(frac=sample)
     train_data = dataset.iloc[0:int(0.7 * len(dataset.index))]
     Xtrain = train_data.Text
@@ -92,25 +107,40 @@ def prepare_data(file_url, sample=0.01,
     Xtest = test_data.Text
     Ytest = test_data.Language
 
-    return Xtrain, Ytrain, Xtest, Ytest
+    Xtrain, vocabulary = categorical_encoder(Xtrain)
+    Xtrain = Xtrain.toarray()
+    Xtest, _ = categorical_encoder(Xtest, vocabulary=vocabulary)
+    Xtest = Xtest.toarray()
+
+    return Xtrain, Ytrain, Xtest, Ytest, vocabulary
 
 
-def accuracy(y, y_hat):
+def accuracy(Y, Y_hat):
+
     eqs = 0
-    for a, b in zip(y, y_hat):
+    for a, b in zip(Y, Y_hat):
         if a == b:
             eqs += 1
 
-    return eqs / len(y)
+    return eqs / len(Y)
 
 
 class OVRClassifier:
-
+    """This class implements a One-Versus-Rest classifier using binary
+    Logistic Regression models. After trained, the self.classifiers attribite
+    is adictionary whose values are the trained models for n_classes.
+    To access the parameters of each models it is needed to do
+    self.classifiers[label].beta
+    self.classifiers[label].beta_0
+    """
     def __init__(self, BinaryClassifier):
+
         self.BinaryClassifier = BinaryClassifier
 
+
     def make_datsets(self, X, Y):
-        
+        """This function split the dataset into n_classes subsets.
+        """
         self.classes = set(Y)
         datasets = {c: [] for c in self.classes}
         for x, y in zip(X, Y):
@@ -120,6 +150,9 @@ class OVRClassifier:
 
 
     def make_ovr_dataset(self, class_, datasets):
+        """This function splits the dataset into n_classes subsets and combines
+        them to form n_classes OVR learning problems. 
+        """
         X_positive = np.vstack(datasets[class_])
         Y_positive = np.array([1] * X_positive.shape[0])
         X_negative = [np.vstack(datasets[l])
@@ -133,10 +166,15 @@ class OVRClassifier:
 
 
     def fit(self, X, Y):
+        """This function splits the dataset into n_classes subsets and combines
+        them to train separately n_classes Logistic Regression models in a OVR
+        fashion.
+        """
         datasets = self.make_datsets(X, Y)
         self.classifiers = {}
 
         for c in self.classes:
+            print("\nTraining classifier for class {}\n".format(c))
             X, Y =self.make_ovr_dataset(class_=c, datasets=datasets)
             clf = self.BinaryClassifier()
             self.classifiers[c] = clf.fit(X, Y)
@@ -145,6 +183,9 @@ class OVRClassifier:
 
 
     def predict(self, X):
+        """This function takes the trained models for each OVR learning problem
+        and predicts their corresponding binomial probability distributions. 
+        """
         predictions = np.zeros((len(self.classes), X.shape[0]))
         for c in self.classes:
             predictions[c, :] = self.classifiers[c].predict(X).reshape(1, -1)
@@ -153,10 +194,11 @@ class OVRClassifier:
 
 
 class LogisticRegressionClassifier:
-
-    def __init__(self, normalize=False, batch_size=10, n_epochs=100,
+    """This class creates a Logistic Regression model and trains it using
+    gradient descent algorithm.
+    """
+    def __init__(self, batch_size=32, n_epochs=100,
                                     learning_rate=0.01, predict_proba=True):
-        self.normalize = normalize
         self.batch_size = batch_size
         self.n_epochs = n_epochs
         self.learning_rate = learning_rate
@@ -164,56 +206,69 @@ class LogisticRegressionClassifier:
 
 
     def sigmoid(self, x):
+
         return 1.0 / (1.0 + np.exp(-x))
 
 
-    def loss_function(self, y, y_hat):
+    def loss_function(self, Y, Y_hat):
+        """This function calculates the cross entropy loss fro training and
+        predicted labels.
+        """
         cross_entropy = -np.mean(
-                            y * (np.log(y_hat)) - (1 - y) * np.log(1 - y_hat))
+                            Y * (np.log(Y_hat)) - (1 - Y) * np.log(1 - Y_hat))
 
         return cross_entropy
 
 
-    def evaluate_gradients(self, X, y, y_hat):
+    def evaluate_gradients(self, X, Y, Y_hat):
+        """This function evaluates precomputed gradients of the loss function.
+        """
         N = X.shape[0]
+        G_beta = (1 / N) * np.dot(X.T, (Y_hat - Y))
+        G_beta_0 = (1 / N) * np.sum((Y_hat - Y)) 
 
-        Dw = (1 / N) * np.dot(X.T, (y_hat - y))
-        Db = (1 / N) * np.sum((y_hat - y)) 
-
-        return Dw, Db
-
-
-    def normalize_data(self, X):
-        X = (X - X.mean(axis=0)) / X.std(axis=0)
-        
-        return X
+        return G_beta, G_beta_0
 
 
-    def fit(self, X, y):
+    def gradient_descent(self, X, Y, Y_hat):
+        """This function evaluates the gradients of the loss function and uses
+        them to update the coefficients of the LR model.
+        """
+        G_beta, G_beta_0 = self.evaluate_gradients(X, Y, Y_hat)
+        self.beta -= self.learning_rate * G_beta
+        self.beta_0 -= self.learning_rate * G_beta_0
 
-        m, n = X.shape
-        self.W = np.zeros((n, 1))
-        self.b = 0
-        y = y.reshape(m, 1)
 
-        if self.normalize:
-            X = self.normalize_data(X)
+    def logit(self, X):
+        """This function computes the logits of the LR model using the current
+        coefficients.
+        """
+        return np.dot(X, self.beta) + self.beta_0
+
+
+    def batches(self, X):
+        """This function splits the input data into equal size batches and
+        generates them as items of an interable.
+        """
+        data_size = X.shape[0]
+        for current in range(0, data_size, self.batch_size):
+            yield X[current:min(current + self.batch_size, data_size)]
+
+
+    def fit(self, X, Y):
+        """This function fits a Logistic Regression model from data.
+        """
+        self.beta = np.zeros((X.shape[1], 1))
+        self.beta_0 = 0.0
+        Y = Y.reshape(-1, 1)
 
         for epoch in range(self.n_epochs):
-            for i in range((m - 1)//self.batch_size + 1):
-                start = i * self.batch_size
-                end = start + self.batch_size
-                x_batch = X[start:end]
-                y_batch = y[start:end]
-                
-                y_hat = self.sigmoid(np.dot(x_batch, self.W) + self.b)
-                D_W, D_b = self.evaluate_gradients(x_batch, y_batch, y_hat)
-
-                self.W -= self.learning_rate * D_W
-                self.b -= self.learning_rate * D_b
+            for X_batch, Y_batch in zip(self.batches(X), self.batches(Y)):     
+                logits = self.logit(X_batch)
+                Y_hat = self.sigmoid(logits)
+                self.gradient_descent(X_batch, Y_batch, Y_hat)
             
-            ce = self.loss_function(
-                                y, self.sigmoid(np.dot(X, self.W) + self.b))
+            ce = self.loss_function(Y_batch, Y_hat)
             print("Epoch {}/{}  |  Cross Entropy loss: {}".format(
                                                     epoch, self.n_epochs, ce))
         
@@ -221,16 +276,14 @@ class LogisticRegressionClassifier:
 
 
     def predict(self, X):
-        if self.normalize:
-            X = self.normalize_data(X)
 
-        preds = self.sigmoid(np.dot(X, self.W) + self.b)
+        logits = self.logit(X)
+        probabilities = self.sigmoid(logits)
         if self.predict_proba:
-            return preds
-
-        pred_class = [1 if i > 0.5 else 0 for i in preds]
-
-        return np.array(pred_class)
+            return probabilities
+        else:
+            Y_hat = [1 if i > 0.5 else 0 for i in probabilities]
+            return np.array(Y_hat)
 
 
 
@@ -240,19 +293,18 @@ training_portion = 1.0
 languages = ['English', 'French', 'German']
 # Load dataset from https://www.kaggle.com/basilb2s/language-detection
 # I uploaded it to my git repo:
-url = ("https://raw.githubusercontent.com/"
-        "iarroyof/ukp_app/main/Language%20Detection.csv")
-
+if path.exists("Language_Detection.csv"):
+    url = "Language_Detection.csv"
+else:
+    url = ("https://raw.githubusercontent.com/"
+                            "iarroyof/ukp_app/main/Language%20Detection.csv")
+print("Loading data from: {}".format(url))
 # Prepare train and test data for three languages. Each dcoument is represented
 # first as a list of character n-gram tokens. Then the documents are encoded
 # in binary vectors. You can test the code for any subset of the available 
 # languages in the dataset
-X_train, Y_train, X_test, Y_test = prepare_data(
+X_train, Y_train, X_test, Y_test, vocabulary = prepare_data(
                             url, sample=training_portion, languages=languages)
-X_train, vocabulary = categorical_encoder(X_train)
-X_train = X_train.toarray()
-X_test, _ = categorical_encoder(X_test, vocabulary=vocabulary)
-X_test = X_test.toarray()
 
 # Convert classes to integers and create maps to show results
 label2class = {l: c for l, c in enumerate(set(Y_train))}
@@ -267,12 +319,35 @@ ovr_clf = OVRClassifier(LogisticRegressionClassifier)
 ovr_clf.fit(X_train, Yl_train)
 
 # Make predictions on test data
-y_hat = ovr_clf.predict(X_test)
+Y_hat = ovr_clf.predict(X_test)
 
 print("\nSample of predictions on the test set:\n")
 result = pd.DataFrame({"Y": [label2class[label] for label in Yl_test],
-                        "Y_hat": [label2class[label] for label in y_hat]})
+                        "Y_hat": [label2class[label] for label in Y_hat]})
 print(result.head(50))
 
 # Print test performace results
-print("\nTest Accuracy: {}".format(accuracy(Yl_test, y_hat)))
+print("\nTest Accuracy: {}".format(accuracy(Yl_test, Y_hat)))
+print("If you want to detect language from an input document"
+        " please give it as a *.txt. Otherwise only press ENTER"
+        " to finish:\n>> ")
+filename = input()
+
+while filename.endswith(".txt"):
+    try:
+        f = open(filename)
+        try:
+            test_doc = " ".join(f.readlines())
+        except UnicodeError:
+            f = open(filename, encoding="latin-1")
+            test_doc = " ".join(f.readlines())
+        Xtest, _ = categorical_encoder([test_doc], vocabulary=vocabulary)
+        Xtest = Xtest.toarray()
+        Y_hat = ovr_clf.predict(Xtest)
+        print(Y_hat)
+        print("Predicted lnaguage: {}".format(label2class[Y_hat[0]]))
+        print("Another file?..")
+        filename = input()
+    except:
+        print("File not found. Try again...")
+        filename = input()
